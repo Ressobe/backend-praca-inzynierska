@@ -25,7 +25,6 @@ export class RestaurantsController {
     const paginatedResult = await this.restaurantsService.findAll(filters);
 
     const mappedRestaurants = paginatedResult.data.map((restaurant) => {
-      // Mapujemy tylko dane z paginowanego wyniku
       const mappedOpenHours = restaurant.openHours
         ? plainToInstance(OpenHoursDto, restaurant.openHours)
         : undefined;

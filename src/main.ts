@@ -9,15 +9,18 @@ import { seedDatabase } from './database/seeds/seed';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.useGlobalPipes(new ValidationPipe({
+  app.useGlobalPipes(
+    new ValidationPipe({
       transform: true,
-  }));
+    }),
+  );
 
   const config = new DocumentBuilder()
     .setTitle('Tavoo')
     .setDescription('The tavoo API')
     .setVersion('1.0')
     .addTag('cats')
+    .addBearerAuth()
     .build();
 
   const configService = app.get(ConfigService);

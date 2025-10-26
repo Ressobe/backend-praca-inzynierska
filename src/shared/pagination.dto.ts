@@ -29,8 +29,11 @@ export class PaginationQueryDto {
   limit?: number = 10;
 }
 
-export function PaginatedResponseDto<T>(classRef: new () => T) {
-  class PaginatedDto {
+export function PaginatedResponseDto<T>(classRef: new () => T): any {
+  // Generuj unikalną nazwę dla DTO w oparciu o nazwę klasy bazowej
+  const name = `Paginated${classRef.name}Response`;
+
+  class PaginatedDtoHost {
     @ApiProperty({ type: [classRef] })
     data: T[];
 
@@ -43,7 +46,9 @@ export function PaginatedResponseDto<T>(classRef: new () => T) {
     @ApiProperty({ example: 10, description: 'Items per page' })
     limit: number;
   }
-  return PaginatedDto;
+
+  Object.defineProperty(PaginatedDtoHost, 'name', { value: name });
+  return PaginatedDtoHost;
 }
 
 export interface IPaginatedResult<T> {

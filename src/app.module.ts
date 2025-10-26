@@ -4,7 +4,6 @@ import { RestaurantsModule } from './restaurants/restaurants.module';
 import { AdminModule } from './admin/admin.module';
 import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './users/users.module';
-import { SharedModule } from './shared/shared.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
@@ -42,8 +41,6 @@ import { DATA_SOURCE_OPTIONS } from './database/database.providers';
         return typeOrmConfig;
       },
     }),
-
-    SharedModule,
 
     ReservationsModule,
     RestaurantsModule,
