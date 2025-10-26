@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { Restaurant } from 'src/restaurants/domain/restaurant.entity';
+import { ReservationsValidatorService } from './reservations-validator.service';
 
 @Injectable()
 export class ReservationsService {
@@ -19,6 +20,7 @@ export class ReservationsService {
 
     @InjectRepository(Restaurant)
     private restaurantsRepository: Repository<Restaurant>,
+    private reservationsValidatorService: ReservationsValidatorService,
   ) {}
 
   async create(dto: CreateReservationDto): Promise<Reservation> {
@@ -30,40 +32,13 @@ export class ReservationsService {
     if (!restaurant) throw new NotFoundException('Restauracja nie istnieje');
 
     const date = new Date(dto.date);
-    const now = new Date();
 
-    if (date < now) {
-      throw new BadRequestException('Nie można rezerwować dat z przeszłości');
-    }
-
-    const maxDate = new Date();
-    maxDate.setDate(maxDate.getDate() + 30);
-    if (date > maxDate) {
-      throw new BadRequestException(
-        'Można rezerwować maksymalnie 30 dni do przodu',
-      );
-    }
-
-    const day = date.toLocaleString('en-US', { weekday: 'long' }).toLowerCase();
-    const openHours = restaurant.openHours?.[day];
-
-    if (!openHours) {
-      throw new BadRequestException('Restauracja jest dziś zamknięta');
-    }
-
-    const [open, close] = openHours;
-    const reservationTime = date.toTimeString().substring(0, 5);
-
-    if (reservationTime < open || reservationTime > close) {
-      throw new BadRequestException(
-        `Rezerwacja możliwa tylko między ${open} a ${close}`,
-      );
-    }
-
-    const minutes = date.getMinutes();
-    if (minutes !== 0 && minutes !== 30) {
-      throw new BadRequestException('Rezerwacja możliwa tylko co 30 minut');
-    }
+    this.reservationsValidatorService.validateDate(date);
+    this.reservationsValidatorService.validateOpeningHours(
+      date,
+      restaurant.openHours,
+    );
+    this.reservationsValidatorService.validateReservationInterval(date);
 
     const reservation = this.reservationsRepository.create({
       ...dto,
@@ -104,6 +79,12 @@ export class ReservationsService {
     });
     if (!reservation) {
       throw new NotFoundException('Rezerwacja nie istnieje');
+    }
+
+    if (reservation.status === ReservationStatus.CANCELLED) {
+      throw new BadRequestException(
+        'Nie można zmienić statusu anulowanej rezerwacji',
+      );
     }
 
     reservation.status = dto.status;
