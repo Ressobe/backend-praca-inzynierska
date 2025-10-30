@@ -4,19 +4,22 @@ import { Restaurant } from 'src/restaurants/domain/restaurant.entity';
 @Injectable()
 export class ReservationsValidatorService {
   validateDate(date: Date): void {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    date.setHours(0, 0, 0, 0);
+    const reservationDateOnly = new Date(date);
+    reservationDateOnly.setUTCHours(0, 0, 0, 0);
 
-    if (date < now) {
+    const now = new Date();
+    const nowOnlyDate = new Date(now);
+    nowOnlyDate.setUTCHours(0, 0, 0, 0);
+
+    if (reservationDateOnly < nowOnlyDate) {
       throw new BadRequestException('Nie można rezerwować dat z przeszłości');
     }
 
-    const maxDate = new Date();
-    maxDate.setDate(maxDate.getDate() + 30);
-    maxDate.setHours(0, 0, 0, 0);
+    const maxDate = new Date(now);
+    maxDate.setUTCDate(maxDate.getUTCDate() + 30);
+    maxDate.setUTCHours(0, 0, 0, 0);
 
-    if (date > maxDate) {
+    if (reservationDateOnly > maxDate) {
       throw new BadRequestException(
         'Można rezerwować maksymalnie 30 dni do przodu',
       );
