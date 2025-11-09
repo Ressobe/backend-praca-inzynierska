@@ -26,6 +26,15 @@ export class Restaurant extends AbstractEntity<Restaurant> {
   @Column({ type: 'json', nullable: true })
   openHours?: Record<string, [string, string]>;
 
+  @Column({ type: 'float', default: 0 })
+  rating: number;
+
+  @Column({ nullable: true })
+  image?: string;
+
+  @Column({ nullable: true })
+  cuisine?: string;
+
   @OneToMany(() => User, (user) => user.restaurant)
   users: User[];
 

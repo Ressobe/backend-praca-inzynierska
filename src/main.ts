@@ -14,6 +14,7 @@ async function bootstrap() {
       transform: true,
     }),
   );
+  app.enableCors();
 
   const config = new DocumentBuilder()
     .setTitle('Tavoo')
@@ -29,6 +30,11 @@ async function bootstrap() {
   }
 
   const document = SwaggerModule.createDocument(app, config);
+
+  app.getHttpAdapter().get('/openapi.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(document));
+  });
 
   app.use(
     '/docs',

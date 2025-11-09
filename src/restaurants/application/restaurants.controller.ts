@@ -29,13 +29,16 @@ export class RestaurantsController {
         ? plainToInstance(OpenHoursDto, restaurant.openHours)
         : undefined;
 
-      return {
+      return new RestaurantResponseDto({
         id: restaurant.id,
         name: restaurant.name,
         city: restaurant.city,
+        rating: restaurant.rating,
+        cuisine: restaurant.cuisine,
+        image: restaurant.image,
         address: restaurant.address,
         openHours: mappedOpenHours,
-      };
+      });
     });
 
     return {

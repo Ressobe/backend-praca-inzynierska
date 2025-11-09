@@ -5,19 +5,19 @@ import { Restaurant } from 'src/restaurants/domain/restaurant.entity';
 export class ReservationsValidatorService {
   validateDate(date: Date): void {
     const reservationDateOnly = new Date(date);
-    reservationDateOnly.setUTCHours(0, 0, 0, 0);
+    reservationDateOnly.setHours(0, 0, 0, 0);
 
     const now = new Date();
     const nowOnlyDate = new Date(now);
-    nowOnlyDate.setUTCHours(0, 0, 0, 0);
+    nowOnlyDate.setHours(0, 0, 0, 0);
 
     if (reservationDateOnly < nowOnlyDate) {
       throw new BadRequestException('Nie można rezerwować dat z przeszłości');
     }
 
     const maxDate = new Date(now);
-    maxDate.setUTCDate(maxDate.getUTCDate() + 30);
-    maxDate.setUTCHours(0, 0, 0, 0);
+    maxDate.setDate(maxDate.getDate() + 30);
+    maxDate.setHours(0, 0, 0, 0);
 
     if (reservationDateOnly > maxDate) {
       throw new BadRequestException(
@@ -37,7 +37,7 @@ export class ReservationsValidatorService {
       'saturday',
     ];
 
-    const day = daysOfWeek[date.getUTCDay()];
+    const day = daysOfWeek[date.getDay()];
     const openHoursForDay = openHours?.[day];
 
     if (!openHoursForDay) {
@@ -45,9 +45,9 @@ export class ReservationsValidatorService {
     }
 
     const [open, close] = openHoursForDay;
-    const reservationTime = `${String(date.getUTCHours()).padStart(2, '0')}:${String(
-      date.getUTCMinutes(),
-    ).padStart(2, '0')}`; // Format HH:MM
+    const reservationTime = `${String(date.getHours()).padStart(2, '0')}:${String(
+      date.getMinutes(),
+    ).padStart(2, '0')}`;
 
     if (reservationTime < open || reservationTime > close) {
       throw new BadRequestException(
@@ -57,7 +57,7 @@ export class ReservationsValidatorService {
   }
 
   validateReservationInterval(date: Date): void {
-    const minutes = date.getUTCMinutes();
+    const minutes = date.getMinutes();
     if (minutes !== 0 && minutes !== 30) {
       throw new BadRequestException('Rezerwacja możliwa tylko co 30 minut');
     }

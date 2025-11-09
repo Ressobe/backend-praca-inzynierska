@@ -17,18 +17,18 @@ export class AuthService {
     const user = await this.usersService.findOne(email);
 
     if (!user) {
-      throw new UnauthorizedException();
+      throw new UnauthorizedException('Niepoprawny email lub hasło');
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
 
     if (!isMatch) {
-      throw new UnauthorizedException();
+      throw new UnauthorizedException('Niepoprawny email lub hasło');
     }
 
     const payload = {
       sub: user.id,
-      username: user.email,
+      email: user.email,
       restaurantId: user.restaurantId,
     };
 

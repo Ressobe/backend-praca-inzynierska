@@ -6,6 +6,9 @@ import {
   IsDefined,
   IsOptional,
   ValidateNested,
+  IsNumber,
+  Min,
+  Max,
 } from 'class-validator';
 
 export class OpenHoursDto {
@@ -87,4 +90,38 @@ export class RestaurantResponseDto {
   @ValidateNested()
   @Type(() => OpenHoursDto)
   openHours?: OpenHoursDto;
+
+  @ApiProperty({
+    example: 4.5,
+    description: 'Rating of the restaurant (0.0 to 5.0)',
+    type: Number,
+    minimum: 0,
+    maximum: 5,
+  })
+  @IsNumber()
+  @Min(0)
+  @Max(5)
+  rating: number;
+
+  @ApiProperty({
+    example: 'https://example.com/images/sushi_zen.jpg',
+    description: 'URL to the restaurant image',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  image?: string;
+
+  @ApiProperty({
+    example: 'Sushi',
+    description: 'Cuisine type of the restaurant',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  cuisine?: string;
+
+  constructor(data: Partial<RestaurantResponseDto> = {}) {
+    Object.assign(this, data);
+  }
 }

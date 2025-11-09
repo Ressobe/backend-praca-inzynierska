@@ -31,7 +31,11 @@ export class ReservationsService {
     });
     if (!restaurant) throw new NotFoundException('Restauracja nie istnieje');
 
-    const date = new Date(dto.date);
+    const reservationDateTimeString = `${dto.date}T${dto.time}:00`;
+    const date = new Date(reservationDateTimeString);
+    if (isNaN(date.getTime())) {
+      throw new BadRequestException('Nieprawidłowy format daty lub czasu');
+    }
 
     this.reservationsValidatorService.validateDate(date);
     this.reservationsValidatorService.validateOpeningHours(

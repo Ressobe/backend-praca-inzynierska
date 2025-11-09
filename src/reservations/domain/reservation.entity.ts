@@ -30,6 +30,9 @@ export class Reservation extends AbstractEntity<Reservation> {
   @Column({ type: 'timestamp' })
   date: Date;
 
+  @Column({ type: 'varchar', length: 5 })
+  time: string;
+
   @Column({
     type: 'enum',
     enum: ReservationStatus,

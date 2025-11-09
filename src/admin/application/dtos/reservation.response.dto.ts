@@ -18,7 +18,7 @@ export class ReservationResponseDto {
   time: string;
 
   @ApiProperty({ example: 4 })
-  guests: number;
+  peopleCount: number;
 
   @ApiProperty({ enum: ReservationStatus, example: ReservationStatus.PENDING })
   status: ReservationStatus;
