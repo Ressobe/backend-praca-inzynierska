@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { Repository } from 'typeorm';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken, TypeOrmModule } from '@nestjs/typeorm';
 import {
   Reservation,
   ReservationStatus,
@@ -12,22 +12,27 @@ import { CreateReservationDto } from '../src/reservations/application/dto/create
 import { randomUUID } from 'crypto';
 import { ReservationsModule } from '../src/reservations/reservations.module';
 import { ReservationsService } from '../src/reservations/application/reservations.service';
+import { NotificationsService } from '../src/notifications/application/notifications.service';
+import { DataSource } from 'typeorm';
+import { ConfigModule } from '@nestjs/config';
 
 describe('ReservationsController (Integration - Mocked Repositories)', () => {
   let app: INestApplication;
   let reservationRepository: Repository<Reservation>;
   let restaurantRepository: Repository<Restaurant>;
   let reservationsService: ReservationsService;
+  let notificationsService: NotificationsService;
+  let dataSource: DataSource;
 
-  // Stała data do testów
   const MOCKED_DATE = new Date('2025-01-15T12:00:00.000Z');
 
-  // Pełne mocki repozytoriów
   const mockReservationRepository = {
     create: jest.fn().mockImplementation((dto) => dto),
-    save: jest.fn().mockImplementation(
-      (reservation) => Promise.resolve({ id: randomUUID(), ...reservation }), // Zwracaj rzeczywisty obiekt z ID
-    ),
+    save: jest
+      .fn()
+      .mockImplementation((reservation) =>
+        Promise.resolve({ id: randomUUID(), ...reservation }),
+      ),
     findOne: jest.fn(),
   };
 
@@ -35,25 +40,77 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
     findOne: jest.fn(),
   };
 
+  const mockNotificationsService = {
+    sendReservationCreated: jest.fn().mockResolvedValue(undefined),
+    sendReservationCancelled: jest.fn().mockResolvedValue(undefined),
+    sendReservationStatusUpdated: jest.fn().mockResolvedValue(undefined),
+  };
+
+  // Mock for QueryRunner
+  const mockQueryRunner = {
+    connect: jest.fn(),
+    startTransaction: jest.fn(),
+    commitTransaction: jest.fn(),
+    rollbackTransaction: jest.fn(),
+    release: jest.fn(),
+    manager: {
+      create: jest.fn().mockImplementation((_entity, dto) => dto), // Mock create for EntityManager
+      save: jest
+        .fn()
+        .mockImplementation((entity, reservation) =>
+          Promise.resolve({ id: randomUUID(), ...reservation }),
+        ),
+    },
+  };
+
+  // Mock for DataSource
+  const mockDataSource = {
+    createQueryRunner: jest.fn(() => mockQueryRunner),
+  };
+
   beforeEach(async () => {
-    // Resetuj mocki przed każdym testem
     jest.clearAllMocks();
     mockReservationRepository.create.mockClear();
     mockReservationRepository.save.mockClear();
     mockReservationRepository.findOne.mockClear();
     mockRestaurantRepository.findOne.mockClear();
+    mockNotificationsService.sendReservationCreated.mockClear();
+    mockNotificationsService.sendReservationCancelled.mockClear();
+    mockNotificationsService.sendReservationStatusUpdated.mockClear();
+    mockDataSource.createQueryRunner.mockClear();
+    mockQueryRunner.connect.mockClear();
+    mockQueryRunner.startTransaction.mockClear();
+    mockQueryRunner.commitTransaction.mockClear();
+    mockQueryRunner.rollbackTransaction.mockClear();
+    mockQueryRunner.release.mockClear();
+    mockQueryRunner.manager.create.mockClear();
+    mockQueryRunner.manager.save.mockClear();
 
     // Włącz fałszywe timery
     jest.useFakeTimers();
     jest.setSystemTime(MOCKED_DATE);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [ReservationsModule],
+      imports: [
+        TypeOrmModule.forRoot({
+          type: 'sqlite',
+          database: ':memory:',
+          entities: [Reservation, Restaurant],
+          synchronize: false,
+          autoLoadEntities: true,
+        }),
+        ConfigModule.forRoot({ isGlobal: true }),
+        ReservationsModule,
+      ],
     })
       .overrideProvider(getRepositoryToken(Reservation))
       .useValue(mockReservationRepository)
       .overrideProvider(getRepositoryToken(Restaurant))
       .useValue(mockRestaurantRepository)
+      .overrideProvider(NotificationsService)
+      .useValue(mockNotificationsService)
+      .overrideProvider(DataSource)
+      .useValue(mockDataSource)
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -67,6 +124,9 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
     restaurantRepository = moduleFixture.get<Repository<Restaurant>>(
       getRepositoryToken(Restaurant),
     );
+    notificationsService =
+      moduleFixture.get<NotificationsService>(NotificationsService);
+    dataSource = moduleFixture.get<DataSource>(DataSource);
   });
 
   afterEach(async () => {
@@ -82,7 +142,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
 
     const createReservationDto: CreateReservationDto = {
       restaurantId,
-      date: futureDate.toISOString(),
+      date: futureDate.toISOString().split('T')[0],
+      time: '12:00',
       peopleCount: 2,
       name: 'John Doe',
       email: 'john.doe@example.com',
@@ -103,8 +164,6 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
         saturday: ['10:00', '22:00'],
         sunday: ['10:00', '22:00'],
       },
-      // Dodaj inne wymagane pola z Restaurant, jeśli są
-      // createdAt, updatedAt, users, reservations są zazwyczaj opcjonalne lub generowane
     });
 
     const response = await request(app.getHttpServer())
@@ -115,13 +174,25 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
     expect(response.body).toHaveProperty('id');
     expect(response.body.status).toEqual(ReservationStatus.PENDING);
     expect(response.body.email).toEqual(createReservationDto.email);
-    expect(mockReservationRepository.create).toHaveBeenCalledWith(
+    // These expectations now check the queryRunner.manager.create/save
+    expect(mockQueryRunner.manager.create).toHaveBeenCalledWith(
+      Reservation,
       expect.objectContaining({
-        restaurantId: createReservationDto.restaurantId,
+        ...createReservationDto,
         status: ReservationStatus.PENDING,
       }),
     );
-    expect(mockReservationRepository.save).toHaveBeenCalled();
+    expect(mockQueryRunner.manager.save).toHaveBeenCalled();
+    expect(mockDataSource.createQueryRunner).toHaveBeenCalled(); // Ensure query runner was created
+    expect(mockQueryRunner.connect).toHaveBeenCalled(); // Ensure connection
+    expect(mockQueryRunner.startTransaction).toHaveBeenCalled(); // Ensure transaction started
+    expect(mockQueryRunner.commitTransaction).toHaveBeenCalled(); // Ensure transaction committed
+    expect(mockQueryRunner.release).toHaveBeenCalled(); // Ensure query runner released
+    expect(notificationsService.sendReservationCreated).toHaveBeenCalledWith(
+      createReservationDto.email,
+      createReservationDto.name,
+      expect.any(String),
+    );
   });
 
   // Test case 2: Creating a reservation with a past date
@@ -132,7 +203,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
 
     const createReservationDto: CreateReservationDto = {
       restaurantId,
-      date: pastDate.toISOString(),
+      date: pastDate.toISOString().split('T')[0],
+      time: '12:00',
       peopleCount: 2,
       name: 'John Doe',
       email: 'john.doe@example.com',
@@ -156,6 +228,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
     expect(response.body.message).toContain(
       'Nie można rezerwować dat z przeszłości',
     );
+    expect(mockDataSource.createQueryRunner).not.toHaveBeenCalled(); // No transaction for validation errors
+    expect(notificationsService.sendReservationCreated).not.toHaveBeenCalled();
   });
 
   // Test case 3: Creating a reservation with date too far in the future
@@ -168,7 +242,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
 
     const createReservationDto: CreateReservationDto = {
       restaurantId,
-      date: futureDate.toISOString(),
+      date: futureDate.toISOString().split('T')[0],
+      time: '12:00',
       peopleCount: 2,
       name: 'John Doe',
       email: 'john.doe@example.com',
@@ -192,6 +267,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
     expect(response.body.message).toContain(
       'Można rezerwować maksymalnie 30 dni do przodu',
     );
+    expect(mockDataSource.createQueryRunner).not.toHaveBeenCalled(); // No transaction for validation errors
+    expect(notificationsService.sendReservationCreated).not.toHaveBeenCalled();
   });
 
   // Test case 4: Creating a reservation when restaurant is closed on that day
@@ -212,7 +289,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
 
     const createReservationDto: CreateReservationDto = {
       restaurantId,
-      date: futureDate.toISOString(),
+      date: futureDate.toISOString().split('T')[0],
+      time: '12:00',
       peopleCount: 2,
       name: 'John Doe',
       email: 'john.doe@example.com',
@@ -245,6 +323,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
       .expect(400);
 
     expect(response.body.message).toContain('Restauracja jest dziś zamknięta');
+    expect(mockDataSource.createQueryRunner).not.toHaveBeenCalled(); // No transaction for validation errors
+    expect(notificationsService.sendReservationCreated).not.toHaveBeenCalled();
   });
 
   // Test case 5: Creating a reservation outside opening hours
@@ -265,7 +345,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
 
     const createReservationDto: CreateReservationDto = {
       restaurantId,
-      date: futureDate.toISOString(),
+      date: futureDate.toISOString().split('T')[0],
+      time: '09:00',
       peopleCount: 2,
       name: 'John Doe',
       email: 'john.doe@example.com',
@@ -289,6 +370,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
     expect(response.body.message).toContain(
       'Rezerwacja możliwa tylko między 10:00 a 22:00',
     );
+    expect(mockDataSource.createQueryRunner).not.toHaveBeenCalled(); // No transaction for validation errors
+    expect(notificationsService.sendReservationCreated).not.toHaveBeenCalled();
   });
 
   // Test case 6: Creating a reservation with an invalid time interval
@@ -309,7 +392,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
 
     const createReservationDto: CreateReservationDto = {
       restaurantId,
-      date: futureDate.toISOString(),
+      date: futureDate.toISOString().split('T')[0],
+      time: '12:15',
       peopleCount: 2,
       name: 'John Doe',
       email: 'john.doe@example.com',
@@ -333,6 +417,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
     expect(response.body.message).toContain(
       'Rezerwacja możliwa tylko co 30 minut',
     );
+    expect(mockDataSource.createQueryRunner).not.toHaveBeenCalled(); // No transaction for validation errors
+    expect(notificationsService.sendReservationCreated).not.toHaveBeenCalled();
   });
 
   // Test case 7: Creating a reservation for a non-existent restaurant
@@ -343,7 +429,8 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
 
     const createReservationDto: CreateReservationDto = {
       restaurantId: nonExistentRestaurantId,
-      date: futureDate.toISOString(),
+      date: futureDate.toISOString().split('T')[0],
+      time: '12:00',
       peopleCount: 2,
       name: 'John Doe',
       email: 'john.doe@example.com',
@@ -357,5 +444,7 @@ describe('ReservationsController (Integration - Mocked Repositories)', () => {
       .expect(404);
 
     expect(response.body.message).toContain('Restauracja nie istnieje');
+    expect(mockDataSource.createQueryRunner).not.toHaveBeenCalled(); // No transaction for validation errors
+    expect(notificationsService.sendReservationCreated).not.toHaveBeenCalled();
   });
 });

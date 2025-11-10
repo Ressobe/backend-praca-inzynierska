@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ReservationsValidatorService } from './reservations-validator.service';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Reservation, ReservationStatus } from '../domain/reservation.entity';
 import { ReservationsService } from './reservations.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -13,12 +13,17 @@ jest.mock('crypto', () => ({
 }));
 import { randomUUID } from 'crypto';
 import { CreateReservationDto } from './dto/create-reservation.dto';
+import { NotificationsService } from 'src/notifications/application/notifications.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('ReservationsService', () => {
   let reservationsValidatorService: ReservationsValidatorService;
   let reservationsService: ReservationsService;
   let reservationsRepository: jest.Mocked<Repository<Reservation>>;
   let restaurantsRepository: jest.Mocked<Repository<Restaurant>>;
+  let notificationsService: jest.Mocked<NotificationsService>;
+  let dataSource: jest.Mocked<DataSource>;
+  let configService: jest.Mocked<ConfigService>;
 
   const mockReservationRepository = {
     create: jest.fn(),
@@ -30,6 +35,44 @@ describe('ReservationsService', () => {
     findOne: jest.fn(),
   };
 
+  const mockNotificationsService = {
+    sendReservationCreated: jest.fn(),
+    sendReservationCancelled: jest.fn(),
+    sendReservationStatusUpdated: jest.fn(),
+  };
+
+  const mockQueryRunner = {
+    connect: jest.fn(),
+    startTransaction: jest.fn(),
+    commitTransaction: jest.fn(),
+    rollbackTransaction: jest.fn(),
+    release: jest.fn(),
+    manager: {
+      create: jest.fn(),
+      save: jest.fn((entityOrTarget: any, maybeEntity?: any) => {
+        // If save is called with two arguments (EntityClass, entityObject)
+        if (maybeEntity) {
+          return Promise.resolve(maybeEntity); // Return the entity object
+        }
+        // If called with one argument (entityObject)
+        return Promise.resolve(entityOrTarget);
+      }),
+    },
+  };
+
+  const mockDataSource = {
+    createQueryRunner: jest.fn(() => mockQueryRunner),
+  };
+
+  const mockConfigService = {
+    get: jest.fn((key: string) => {
+      if (key === 'FRONTEND_URL') {
+        return 'http://localhost:3000';
+      }
+      return undefined;
+    }),
+  };
+
   beforeAll(() => {
     jest.useFakeTimers();
   });
@@ -39,7 +82,7 @@ describe('ReservationsService', () => {
   });
 
   beforeEach(async () => {
-    jest.setSystemTime(new Date('2025-10-26T00:00:00.000Z'));
+    jest.setSystemTime(new Date('2025-10-26T00:00:00.000Z')); // Ustawienie czasu systemowego na niedzielę
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -53,6 +96,18 @@ describe('ReservationsService', () => {
           provide: getRepositoryToken(Restaurant),
           useValue: mockRestaurantRepository,
         },
+        {
+          provide: NotificationsService,
+          useValue: mockNotificationsService,
+        },
+        {
+          provide: DataSource,
+          useValue: mockDataSource,
+        },
+        {
+          provide: ConfigService,
+          useValue: mockConfigService,
+        },
       ],
     }).compile();
 
@@ -62,14 +117,22 @@ describe('ReservationsService', () => {
     reservationsService = module.get<ReservationsService>(ReservationsService);
     reservationsRepository = module.get(getRepositoryToken(Reservation));
     restaurantsRepository = module.get(getRepositoryToken(Restaurant));
+    notificationsService = module.get(NotificationsService);
+    dataSource = module.get(DataSource);
+    configService = module.get(ConfigService);
 
     jest.clearAllMocks();
-    (randomUUID as jest.Mock).mockClear();
+    (randomUUID as jest.Mock).mockClear(); // Czyszczenie mocka randomUUID
+    mockQueryRunner.manager.create.mockClear();
+    mockQueryRunner.manager.save.mockClear();
   });
 
   it('should be defined', () => {
     expect(reservationsService).toBeDefined();
     expect(reservationsValidatorService).toBeDefined();
+    expect(notificationsService).toBeDefined();
+    expect(dataSource).toBeDefined();
+    expect(configService).toBeDefined();
   });
 
   describe('validateDate', () => {
@@ -126,7 +189,8 @@ describe('ReservationsService', () => {
     };
 
     it('should accept a reservation if it is within restaurant opening hours', () => {
-      const dateInHours = new Date('2025-10-26T12:00:00.000Z');
+      // Używamy daty lokalnej (bez Z) z godziny 12:00 w niedzielę, by pasowało do 09:00-23:00
+      const dateInHours = new Date('2025-10-26T12:00:00');
 
       expect(() =>
         reservationsValidatorService.validateOpeningHours(
@@ -137,7 +201,8 @@ describe('ReservationsService', () => {
     });
 
     it('should reject a reservation if it is before restaurant opening hours', () => {
-      const dateBeforeHours = new Date('2025-10-26T08:00:00.000Z');
+      // Używamy daty lokalnej (bez Z) z godziny 08:00 w niedzielę, która jest przed 09:00
+      const dateBeforeHours = new Date('2025-10-26T08:00:00');
 
       expect(() =>
         reservationsValidatorService.validateOpeningHours(
@@ -154,7 +219,8 @@ describe('ReservationsService', () => {
     });
 
     it('should reject a reservation if it is after restaurant opening hours', () => {
-      const dateAfterHours = new Date('2025-10-26T23:01:00.000Z');
+      // Używamy daty lokalnej (bez Z) z godziny 23:01 w niedzielę, która jest po 23:00
+      const dateAfterHours = new Date('2025-10-26T23:01:00');
 
       expect(() =>
         reservationsValidatorService.validateOpeningHours(
@@ -171,7 +237,8 @@ describe('ReservationsService', () => {
     });
 
     it('should reject a reservation if the restaurant is closed on the given day', () => {
-      const dateClosedDay = new Date('2025-10-26T12:00:00.000Z');
+      // Używamy daty lokalnej (bez Z) z godziny 12:00 w niedzielę, dla restauracji zamkniętej w niedziele
+      const dateClosedDay = new Date('2025-10-26T12:00:00');
 
       expect(() =>
         reservationsValidatorService.validateOpeningHours(
@@ -188,7 +255,7 @@ describe('ReservationsService', () => {
     });
 
     it('should reject a reservation if openHours are undefined for the restaurant', () => {
-      const date = new Date('2025-10-26T12:00:00.000Z');
+      const date = new Date('2025-10-26T12:00:00');
 
       expect(() =>
         reservationsValidatorService.validateOpeningHours(date, undefined),
@@ -249,28 +316,30 @@ describe('ReservationsService', () => {
       name: 'John Doe',
       email: 'john@example.com',
       peopleCount: 2,
-      date: new Date().toISOString(),
+      date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
+      time: '12:00',
     };
 
     beforeEach(() => {
       restaurantsRepository.findOne.mockResolvedValue(mockRestaurant);
-      reservationsRepository.create.mockImplementation(
-        (dto) =>
+
+      // Mock queryRunner.manager for operations inside the transaction in the service
+      mockQueryRunner.manager.create.mockImplementation(
+        (entity, dto) =>
           ({
+            // Zwracamy dto z cancelToken, tak jak jest przekazane
             id: 'some-uuid',
             ...dto,
             status: ReservationStatus.PENDING,
-            cancelToken: 'mock-token',
             createdAt: new Date(),
             updatedAt: new Date(),
             restaurant: mockRestaurant,
           }) as Reservation,
       );
-      reservationsRepository.save.mockImplementation((entity: Reservation) =>
+      mockQueryRunner.manager.save.mockImplementation((entity: Reservation) =>
         Promise.resolve(entity),
       );
 
-      (randomUUID as jest.Mock).mockClear();
       jest
         .spyOn(reservationsValidatorService, 'validateDate')
         .mockImplementation(() => {});
@@ -280,6 +349,12 @@ describe('ReservationsService', () => {
       jest
         .spyOn(reservationsValidatorService, 'validateReservationInterval')
         .mockImplementation(() => {});
+      mockNotificationsService.sendReservationCreated.mockResolvedValue(
+        undefined,
+      );
+      mockQueryRunner.commitTransaction.mockClear();
+      mockQueryRunner.rollbackTransaction.mockClear();
+      mockQueryRunner.release.mockClear();
     });
 
     it('should generate and assign a unique cancellation token when creating a reservation', async () => {
@@ -290,26 +365,26 @@ describe('ReservationsService', () => {
       validDate.setDate(validDate.getDate() + 1);
       const dto: CreateReservationDto = {
         ...baseDto,
-        date: validDate.toISOString(),
+        date: validDate.toISOString().split('T')[0],
       };
 
       await reservationsService.create(dto);
 
       expect(randomUUID).toHaveBeenCalledTimes(1);
-      expect(reservationsRepository.create).toHaveBeenCalledWith(
+      expect(mockQueryRunner.manager.create).toHaveBeenCalledWith(
+        Reservation,
         expect.objectContaining({
           cancelToken: mockUuid,
         }),
       );
     });
 
-    // Dodano mockowanie walidatora, aby testować logikę `create` w izolacji od walidacji
     it('should call validator services during reservation creation', async () => {
       const validDate = new Date();
       validDate.setDate(validDate.getDate() + 1);
       const dto: CreateReservationDto = {
         ...baseDto,
-        date: validDate.toISOString(),
+        date: validDate.toISOString().split('T')[0],
       };
 
       await reservationsService.create(dto);
@@ -329,7 +404,7 @@ describe('ReservationsService', () => {
       restaurantsRepository.findOne.mockResolvedValue(null);
       const dto: CreateReservationDto = {
         ...baseDto,
-        date: new Date().toISOString(),
+        date: new Date().toISOString().split('T')[0],
       };
       await expect(reservationsService.create(dto)).rejects.toThrow(
         NotFoundException,
@@ -337,6 +412,66 @@ describe('ReservationsService', () => {
       await expect(reservationsService.create(dto)).rejects.toThrow(
         'Restauracja nie istnieje',
       );
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
+    });
+
+    it('should throw an error if FRONTEND_URL is not set', async () => {
+      configService.get.mockReturnValueOnce(undefined);
+      const validDate = new Date();
+      validDate.setDate(validDate.getDate() + 1);
+      const dto: CreateReservationDto = {
+        ...baseDto,
+        date: validDate.toISOString().split('T')[0],
+      };
+
+      await expect(reservationsService.create(dto)).rejects.toThrow(
+        'Frontend url not set in enviroment',
+      );
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
+    });
+
+    it('should use a transaction for creation and commit on success', async () => {
+      const validDate = new Date();
+      validDate.setDate(validDate.getDate() + 1);
+      const dto: CreateReservationDto = {
+        ...baseDto,
+        date: validDate.toISOString().split('T')[0],
+      };
+
+      await reservationsService.create(dto);
+
+      expect(dataSource.createQueryRunner).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.connect).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.startTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.rollbackTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('should rollback transaction on error during creation', async () => {
+      const validDate = new Date();
+      validDate.setDate(validDate.getDate() + 1);
+      const dto: CreateReservationDto = {
+        ...baseDto,
+        date: validDate.toISOString().split('T')[0],
+      };
+
+      mockQueryRunner.manager.save.mockRejectedValueOnce(
+        new Error('Simulated save error'),
+      );
+
+      await expect(reservationsService.create(dto)).rejects.toThrow(
+        'Simulated save error',
+      );
+
+      expect(dataSource.createQueryRunner).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.connect).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.startTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -348,6 +483,7 @@ describe('ReservationsService', () => {
       email: 'john@example.com',
       peopleCount: 2,
       date: new Date('2025-11-01T12:00:00.000Z'),
+      time: '12:00',
       status: ReservationStatus.PENDING,
       cancelToken: 'some-token',
       restaurantId: 'some-restaurant-id',
@@ -355,6 +491,18 @@ describe('ReservationsService', () => {
       updatedAt: new Date(),
       restaurant: {} as any,
     };
+
+    beforeEach(() => {
+      mockQueryRunner.manager.save.mockImplementation((entity: Reservation) =>
+        Promise.resolve(entity),
+      );
+      mockNotificationsService.sendReservationStatusUpdated.mockResolvedValue(
+        undefined,
+      );
+      mockQueryRunner.commitTransaction.mockClear();
+      mockQueryRunner.rollbackTransaction.mockClear();
+      mockQueryRunner.release.mockClear();
+    });
 
     it('should update status from PENDING to ACCEPTED successfully', async () => {
       const pendingReservation = {
@@ -364,9 +512,6 @@ describe('ReservationsService', () => {
       const updateDto: UpdateStatusDto = { status: ReservationStatus.ACCEPTED };
 
       reservationsRepository.findOne.mockResolvedValue(pendingReservation);
-      reservationsRepository.save.mockImplementation((entity: Reservation) =>
-        Promise.resolve(entity),
-      );
 
       const result = await reservationsService.updateStatus(
         reservationId,
@@ -376,7 +521,7 @@ describe('ReservationsService', () => {
       expect(reservationsRepository.findOne).toHaveBeenCalledWith({
         where: { id: reservationId },
       });
-      expect(reservationsRepository.save).toHaveBeenCalledWith(
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledWith(
         expect.objectContaining({
           id: reservationId,
           status: ReservationStatus.ACCEPTED,
@@ -393,9 +538,6 @@ describe('ReservationsService', () => {
       const updateDto: UpdateStatusDto = { status: ReservationStatus.REJECTED };
 
       reservationsRepository.findOne.mockResolvedValue(pendingReservation);
-      reservationsRepository.save.mockImplementation((entity: Reservation) =>
-        Promise.resolve(entity),
-      );
 
       const result = await reservationsService.updateStatus(
         reservationId,
@@ -405,7 +547,7 @@ describe('ReservationsService', () => {
       expect(reservationsRepository.findOne).toHaveBeenCalledWith({
         where: { id: reservationId },
       });
-      expect(reservationsRepository.save).toHaveBeenCalledWith(
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledWith(
         expect.objectContaining({
           id: reservationId,
           status: ReservationStatus.REJECTED,
@@ -424,6 +566,8 @@ describe('ReservationsService', () => {
       await expect(
         reservationsService.updateStatus('non-existent-id', updateDto),
       ).rejects.toThrow('Rezerwacja nie istnieje');
+      expect(mockQueryRunner.manager.save).not.toHaveBeenCalled();
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
     });
 
     it('should throw BadRequestException if trying to update status of a CANCELLED reservation', async () => {
@@ -441,7 +585,93 @@ describe('ReservationsService', () => {
       await expect(
         reservationsService.updateStatus(reservationId, updateDto),
       ).rejects.toThrow('Nie można zmienić statusu anulowanej rezerwacji');
-      expect(reservationsRepository.save).not.toHaveBeenCalled();
+      expect(mockQueryRunner.manager.save).not.toHaveBeenCalled();
+    });
+
+    it('should return the same reservation if status is already the same', async () => {
+      const acceptedReservation = {
+        ...baseReservation,
+        status: ReservationStatus.ACCEPTED,
+      };
+      const updateDto: UpdateStatusDto = { status: ReservationStatus.ACCEPTED };
+
+      reservationsRepository.findOne.mockResolvedValue(acceptedReservation);
+
+      const result = await reservationsService.updateStatus(
+        reservationId,
+        updateDto,
+      );
+
+      expect(reservationsRepository.findOne).toHaveBeenCalledWith({
+        where: { id: reservationId },
+      });
+      expect(mockQueryRunner.manager.save).not.toHaveBeenCalled();
+      expect(result).toEqual(acceptedReservation);
+    });
+
+    it('should call notificationsService.sendReservationStatusUpdated on successful status update', async () => {
+      const pendingReservation = {
+        ...baseReservation,
+        status: ReservationStatus.PENDING,
+      };
+      const updateDto: UpdateStatusDto = { status: ReservationStatus.ACCEPTED };
+
+      reservationsRepository.findOne.mockResolvedValue(pendingReservation);
+
+      await reservationsService.updateStatus(reservationId, updateDto);
+
+      expect(
+        notificationsService.sendReservationStatusUpdated,
+      ).toHaveBeenCalledWith(
+        pendingReservation.email,
+        pendingReservation.name,
+        ReservationStatus.ACCEPTED,
+      );
+    });
+
+    it('should use a transaction for status update and commit on success', async () => {
+      const pendingReservation = {
+        ...baseReservation,
+        status: ReservationStatus.PENDING,
+      };
+      const updateDto: UpdateStatusDto = { status: ReservationStatus.ACCEPTED };
+
+      reservationsRepository.findOne.mockResolvedValue(pendingReservation);
+
+      await reservationsService.updateStatus(reservationId, updateDto);
+
+      expect(dataSource.createQueryRunner).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.connect).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.startTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.rollbackTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('should rollback transaction on error during status update', async () => {
+      const pendingReservation = {
+        ...baseReservation,
+        status: ReservationStatus.PENDING,
+      };
+      const updateDto: UpdateStatusDto = { status: ReservationStatus.ACCEPTED };
+
+      reservationsRepository.findOne.mockResolvedValue(pendingReservation);
+      mockQueryRunner.manager.save.mockRejectedValueOnce(
+        new Error('Simulated save error'),
+      );
+
+      await expect(
+        reservationsService.updateStatus(reservationId, updateDto),
+      ).rejects.toThrow('Simulated save error');
+
+      expect(dataSource.createQueryRunner).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.connect).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.startTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -454,6 +684,7 @@ describe('ReservationsService', () => {
       email: 'jane@example.com',
       peopleCount: 3,
       date: new Date('2025-11-05T18:00:00.000Z'),
+      time: '18:00',
       status: ReservationStatus.PENDING,
       cancelToken: reservationToken,
       restaurantId: 'rest-id-1',
@@ -462,22 +693,31 @@ describe('ReservationsService', () => {
       restaurant: {} as any,
     };
 
+    beforeEach(() => {
+      mockQueryRunner.manager.save.mockImplementation((entity: Reservation) =>
+        Promise.resolve(entity),
+      );
+      mockNotificationsService.sendReservationCancelled.mockResolvedValue(
+        undefined,
+      );
+      mockQueryRunner.commitTransaction.mockClear();
+      mockQueryRunner.rollbackTransaction.mockClear();
+      mockQueryRunner.release.mockClear();
+    });
+
     it('should cancel a reservation with a valid token', async () => {
       const pendingReservation = {
         ...baseReservation,
         status: ReservationStatus.PENDING,
       };
       reservationsRepository.findOne.mockResolvedValue(pendingReservation);
-      reservationsRepository.save.mockImplementation((entity: Reservation) =>
-        Promise.resolve(entity),
-      );
 
       const result = await reservationsService.cancelByToken(reservationToken);
 
       expect(reservationsRepository.findOne).toHaveBeenCalledWith({
         where: { cancelToken: reservationToken },
       });
-      expect(reservationsRepository.save).toHaveBeenCalledWith(
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledWith(
         expect.objectContaining({
           ...pendingReservation,
           status: ReservationStatus.CANCELLED,
@@ -495,31 +735,80 @@ describe('ReservationsService', () => {
       await expect(
         reservationsService.cancelByToken(nonExistentToken),
       ).rejects.toThrow('Nie znaleziono rezerwacji');
-      expect(reservationsRepository.save).not.toHaveBeenCalled();
+      expect(mockQueryRunner.manager.save).not.toHaveBeenCalled();
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
     });
 
-    it('should allow re-cancelling an already cancelled reservation (current behavior)', async () => {
+    it('should throw BadRequestException if reservation is already CANCELLED', async () => {
       const cancelledReservation = {
         ...baseReservation,
         status: ReservationStatus.CANCELLED,
       };
       reservationsRepository.findOne.mockResolvedValue(cancelledReservation);
-      reservationsRepository.save.mockImplementation((entity: Reservation) =>
-        Promise.resolve(entity),
+
+      await expect(
+        reservationsService.cancelByToken(reservationToken),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        reservationsService.cancelByToken(reservationToken),
+      ).rejects.toThrow('Rezerwacja jest już anulowana.');
+      expect(mockQueryRunner.manager.save).not.toHaveBeenCalled();
+      expect(dataSource.createQueryRunner).not.toHaveBeenCalled();
+    });
+
+    it('should call notificationsService.sendReservationCancelled on successful cancellation', async () => {
+      const pendingReservation = {
+        ...baseReservation,
+        status: ReservationStatus.PENDING,
+      };
+      reservationsRepository.findOne.mockResolvedValue(pendingReservation);
+
+      await reservationsService.cancelByToken(reservationToken);
+
+      expect(
+        notificationsService.sendReservationCancelled,
+      ).toHaveBeenCalledWith(pendingReservation.email, pendingReservation.name);
+    });
+
+    it('should use a transaction for cancellation and commit on success', async () => {
+      const pendingReservation = {
+        ...baseReservation,
+        status: ReservationStatus.PENDING,
+      };
+      reservationsRepository.findOne.mockResolvedValue(pendingReservation);
+
+      await reservationsService.cancelByToken(reservationToken);
+
+      expect(dataSource.createQueryRunner).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.connect).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.startTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.rollbackTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('should rollback transaction on error during cancellation', async () => {
+      const pendingReservation = {
+        ...baseReservation,
+        status: ReservationStatus.PENDING,
+      };
+      reservationsRepository.findOne.mockResolvedValue(pendingReservation);
+      mockQueryRunner.manager.save.mockRejectedValueOnce(
+        new Error('Simulated save error'),
       );
 
-      const result = await reservationsService.cancelByToken(reservationToken);
+      await expect(
+        reservationsService.cancelByToken(reservationToken),
+      ).rejects.toThrow('Simulated save error');
 
-      expect(reservationsRepository.findOne).toHaveBeenCalledWith({
-        where: { cancelToken: reservationToken },
-      });
-      expect(reservationsRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          ...cancelledReservation,
-          status: ReservationStatus.CANCELLED,
-        }),
-      );
-      expect(result).toEqual({ message: 'Rezerwacja została anulowana.' });
+      expect(dataSource.createQueryRunner).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.connect).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.startTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+      expect(mockQueryRunner.release).toHaveBeenCalledTimes(1);
     });
   });
 });
