@@ -1,0 +1,24 @@
+FROM node:24-alpine AS builder
+
+WORKDIR /usr/src/app
+
+# Install bash for the entrypoint script and wait-for-it.sh
+RUN apk add --no-cache bash curl && \
+    curl -o /usr/local/bin/wait-for-it.sh https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh && \
+    chmod +x /usr/local/bin/wait-for-it.sh
+
+COPY package*.json ./
+RUN npm install
+
+# Copy the rest of the application code
+COPY . .
+
+# Copy and make executable the custom entrypoint script
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
+
+EXPOSE 3001
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
+CMD ["npm", "run", "start:dev"]
+

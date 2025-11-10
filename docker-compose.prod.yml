@@ -11,5 +11,17 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  backend_prod:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    ports:
+      - '3001:3001'
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+    volumes:
+      - ./src:/usr/src/app/src
+
 volumes:
   postgres_data:

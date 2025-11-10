@@ -10,7 +10,7 @@ export const databaseProviders = [
     useFactory: (configService: ConfigService): DataSourceOptions => {
       return {
         type: 'postgres',
-        host: 'localhost',
+        host: configService.get<string>('DB_HOST') || 'localhost',
         port: 5432,
         username: configService.get<string>('POSTGRES_USER'),
         password: configService.get<string>('POSTGRES_PASSWORD'),
