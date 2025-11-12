@@ -30,6 +30,8 @@ jobs:
 
       - name: Run E2E Tests
         run: npm run test:e2e
+        env:
+          FRONTEND_URL: http://localhost:3000
 
   build:
     name: Create Build
