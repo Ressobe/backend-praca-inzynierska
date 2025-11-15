@@ -3,7 +3,6 @@ version: '3.8'
 services:
   postgres:
     image: postgres:latest
-    container_name: tavoo_postgres
     restart: always
     environment:
       POSTGRES_USER_FILE: /run/secrets/tavoo_db_user
@@ -25,7 +24,6 @@ services:
 
   backend:
     image: ghcr.io/ressobe/backend-praca-inzynierska:latest
-    container_name: tavoo_backend
     depends_on:
       - postgres
     environment:
@@ -33,12 +31,10 @@ services:
       - NODE_ENV=production
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_USER=${DB_USER}
-      - DB_PASS=${DB_PASS}
-      - DB_NAME=${DB_NAME}
     secrets:
       - tavoo_db_user
       - tavoo_db_pass
+      - tavoo_db_name
     networks:
       - tavoo_net
     deploy:
@@ -48,7 +44,6 @@ services:
 
   frontend:
     image: ghcr.io/ressobe/frontend-praca-inzynierska:latest
-    container_name: tavoo_frontend
     environment:
       - API_SERVER_URL=http://backend:3001
     networks:
