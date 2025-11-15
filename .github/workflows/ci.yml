@@ -94,6 +94,15 @@ jobs:
           username: ressobe
           password: ${{ secrets.GHCR_TOKEN }}
 
+      - name: Upload docker-stack.yml to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.REMOTE_PRIVATE_KEY }}
+          source: docker-stack.yml
+          target: '/home/${{ secrets.REMOTE_USER }}/tavoo'
+
       - name: Ensure secrets exist on VPS
         uses: appleboy/ssh-action@v1.1.0
         with:
@@ -105,15 +114,6 @@ jobs:
             echo -n "${{ secrets.DB_USER }}" | docker secret create tavoo_db_user - 2>/dev/null || true
             echo -n "${{ secrets.DB_PASS }}" | docker secret create tavoo_db_pass - 2>/dev/null || true
             echo -n "${{ secrets.DB_NAME }}" | docker secret create tavoo_db_name - 2>/dev/null || true
-
-      - name: Upload docker-stack.yml to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.REMOTE_HOST }}
-          username: ${{ secrets.REMOTE_USER }}
-          key: ${{ secrets.REMOTE_PRIVATE_KEY }}
-          source: docker-stack.yml
-          target: '/home/${{ secrets.REMOTE_USER }}/tavoo'
 
       - name: Deploy Tavoo stack
         uses: appleboy/ssh-action@v1.1.0
