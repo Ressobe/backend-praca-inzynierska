@@ -81,22 +81,27 @@ jobs:
             ghcr.io/ressobe/backend-praca-inzynierska:${{ github.sha }}
 
   deploy:
-    name: Deploy
     runs-on: ubuntu-latest
-    needs:
-      - docker-build
+    needs: docker-build
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Deploy
-        uses: kitconcept/docker-stack-deploy@v1.2.0
+      - name: Copy stack file to VPS
+        uses: appleboy/scp-action@v0.1.7
         with:
-          registry: 'ghcr.io'
-          username: 'ressobe'
-          password: ${{ secrets.GHCR_TOKEN }}
-          remote_host: ${{ secrets.REMOTE_HOST }}
-          remote_user: ${{ secrets.REMOTE_USER }}
-          remote_private_key: ${{ secrets.REMOTE_PRIVATE_KEY }}
-          stack_file: 'docker-stack.yml'
-          stack_name: 'tavoo'
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.REMOTE_PRIVATE_KEY }}
+          source: ${{ secrets.STACK_FILE }}
+          target: '/home/${{ secrets.REMOTE_USER }}/'
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.REMOTE_PRIVATE_KEY }}
+          script: |
+            cd /home/${{ secrets.REMOTE_USER }}
+            docker stack deploy -c ${{ secrets.STACK_FILE }} ${{ secrets.STACK_NAME }}
