@@ -108,8 +108,14 @@ jobs:
           host: ${{ secrets.REMOTE_HOST }}
           username: ${{ secrets.REMOTE_USER }}
           key: ${{ secrets.REMOTE_PRIVATE_KEY }}
-          source: ./docker-stack.yml
+          source: "backend-praca-inzynierska/docker-stack.yml"
           target: '/home/${{ secrets.REMOTE_USER }}/tavoo'
+      - name: Debug repo contents
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Files:"
+          ls -R .
           
       - name: Check file on VPS
         uses: appleboy/ssh-action@v1.1.0
