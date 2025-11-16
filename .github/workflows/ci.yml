@@ -93,6 +93,14 @@ jobs:
           registry: ghcr.io
           username: ressobe
           password: ${{ secrets.GHCR_TOKEN }}
+          
+      - name: Ensure target directory exists
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.REMOTE_PRIVATE_KEY }}
+          script: mkdir -p /home/${{ secrets.REMOTE_USER }}/tavoo
 
       - name: Upload docker-stack.yml to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -100,8 +108,16 @@ jobs:
           host: ${{ secrets.REMOTE_HOST }}
           username: ${{ secrets.REMOTE_USER }}
           key: ${{ secrets.REMOTE_PRIVATE_KEY }}
-          source: docker-stack.yml
+          source: ./docker-stack.yml
           target: '/home/${{ secrets.REMOTE_USER }}/tavoo'
+          
+      - name: Check file on VPS
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.REMOTE_PRIVATE_KEY }}
+          script: ls -l /home/${{ secrets.REMOTE_USER }}/tavoo/
 
       - name: Ensure secrets exist on VPS
         uses: appleboy/ssh-action@v1.1.0
