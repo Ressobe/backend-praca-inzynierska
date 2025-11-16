@@ -4,7 +4,6 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
-import { ConfigService } from '@nestjs/config';
 import { seedDatabase } from './database/seeds/seed';
 
 async function bootstrap() {
@@ -24,10 +23,7 @@ async function bootstrap() {
     .addBearerAuth()
     .build();
 
-  const configService = app.get(ConfigService);
-  if (configService.get('NODE_ENV') === 'development') {
-    await seedDatabase(app);
-  }
+  await seedDatabase(app);
 
   const document = SwaggerModule.createDocument(app, config);
 
